@@ -1,0 +1,126 @@
+.soc-canvas {
+	--soc-bg: #f4f4f5;
+	--soc-grid: rgba(0, 0, 0, 0.05);
+	--soc-node-bg: #ffffff;
+	--soc-node-border: #a8a8ad;
+	--soc-node-text: #1a1a1a;
+	--soc-edge: #8a8a8a;
+	--soc-muted: #6b6b70;
+
+	position: relative;
+	width: 100%;
+	height: 480px;
+	overflow: hidden;
+	background:
+		linear-gradient(90deg, var(--soc-grid) 1px, transparent 1px) 0 0 / 32px 32px,
+		linear-gradient(var(--soc-grid) 1px, transparent 1px) 0 0 / 32px 32px,
+		var(--soc-bg);
+	border: 1px solid var(--soc-node-border);
+	border-radius: 8px;
+	box-sizing: border-box;
+}
+
+@media (prefers-color-scheme: dark) {
+	.soc-canvas {
+		--soc-bg: #1b1d21;
+		--soc-grid: rgba(255, 255, 255, 0.06);
+		--soc-node-bg: #24272c;
+		--soc-node-border: #3a3d42;
+		--soc-node-text: #e8e8e8;
+		--soc-edge: #7a7e86;
+		--soc-muted: #9a9ea5;
+	}
+}
+
+.soc-canvas__loading,
+.soc-canvas__error {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1em;
+	text-align: center;
+	color: var(--soc-muted);
+	font-size: 0.9rem;
+}
+
+.soc-canvas__viewport {
+	position: absolute;
+	inset: 0;
+	cursor: grab;
+	touch-action: none;
+}
+
+.soc-canvas__viewport.is-dragging {
+	cursor: grabbing;
+}
+
+.soc-canvas__world {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+	will-change: transform;
+}
+
+.soc-canvas__edges {
+	position: absolute;
+	top: 0;
+	left: 0;
+	overflow: visible;
+	pointer-events: none;
+}
+
+.soc-canvas__edge-label {
+	font-size: 12px;
+	fill: var(--soc-muted);
+	paint-order: stroke;
+	stroke: var(--soc-bg);
+	stroke-width: 3px;
+}
+
+.soc-canvas__node {
+	position: absolute;
+	box-sizing: border-box;
+	border: 2px solid var(--soc-node-border);
+	background: var(--soc-node-bg);
+	border-radius: 6px;
+	padding: 8px 10px;
+	overflow: hidden;
+}
+
+.soc-canvas__node-content {
+	height: 100%;
+	overflow: auto;
+	color: var(--soc-node-text);
+	font-size: 13px;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.soc-canvas__controls {
+	position: absolute;
+	right: 10px;
+	bottom: 10px;
+	display: flex;
+	gap: 6px;
+	z-index: 1;
+}
+
+.soc-canvas__controls button {
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--soc-node-border);
+	border-radius: 4px;
+	background: var(--soc-node-bg);
+	color: var(--soc-node-text);
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.soc-canvas__controls button:hover {
+	filter: brightness(0.95);
+}

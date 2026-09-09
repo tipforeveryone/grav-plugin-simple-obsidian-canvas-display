@@ -1,0 +1,26 @@
+name: "[TIP] - Simple Obsidian Canvas Display"
+version: 0.1.0
+description: Hiển thị file Obsidian Canvas (.canvas) đặt ngay trong thư mục trang qua shortcode [canvas file="ten.canvas"] — chỉ render node dạng text kèm màu node/đường nối.
+icon: share-alt
+author:
+  name: tipforeveryone
+keywords: obsidian, canvas, jsoncanvas, shortcode
+license: MIT
+
+dependencies:
+  - { name: grav, version: '>=1.7.0' }
+  - { name: shortcode-core }
+
+form:
+  validation: loose
+  fields:
+    enabled:
+      type: toggle
+      label: Plugin status
+      highlight: 1
+      default: 1
+      options:
+        1: Enabled
+        0: Disabled
+      validate:
+        type: bool
