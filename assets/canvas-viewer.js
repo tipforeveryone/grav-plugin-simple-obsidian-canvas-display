@@ -3,14 +3,16 @@
 
 	// Bảng màu preset của Obsidian Canvas: field "color" trên node/edge là số
 	// '1'..'6' hoặc mã hex tự chọn. Không có preset nào là chuẩn chính thức
-	// trong JSON Canvas spec, đây là xấp xỉ theo màu mặc định của Obsidian.
+	// trong JSON Canvas spec — đây là 6 màu mặc định thật của Obsidian
+	// (đỏ/cam/vàng/lục/lam-cyan/tím), khớp với màu hiển thị khi mở cùng file
+	// .canvas trực tiếp trong app Obsidian, thay cho bộ xấp xỉ thô trước đó.
 	var PRESET_COLORS = {
-		'1': '#e0432c',
-		'2': '#e08a2c',
-		'3': '#d4b91d',
-		'4': '#4f9b3a',
-		'5': '#2c9fe0',
-		'6': '#a25ce0'
+		'1': '#fb464c',
+		'2': '#e9973f',
+		'3': '#e0de71',
+		'4': '#44cf6e',
+		'5': '#53dfdd',
+		'6': '#a882ff'
 	};
 
 	var MIN_SCALE = 0.1;
@@ -29,6 +31,142 @@
 			return key;
 		}
 		return null;
+	}
+
+	function escapeHtml(str) {
+		return String(str)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
+	// Inline markdown trên một dòng đã escape sẵn: code span trước (giữ
+	// nguyên nội dung, tránh bị bold/italic ăn vào), rồi tới bold/italic/link.
+	function renderInline(escapedLine) {
+		var codeSpans = [];
+		// Marker giữ chỗ cho code span khi xử lý bold/italic/link ở dưới —
+		// dùng chuỗi ASCII in được ("@@...@@"), không dùng ký tự điều khiển
+		// (NUL), để tránh việc file nguồn bị ghi lẫn byte NUL thật (từng xảy
+		// ra), khiến git/công cụ khác coi file này là binary.
+		var out = escapedLine.replace(/`([^`]+)`/g, function (m, code) {
+			codeSpans.push(code);
+			return '@@SOC_CODE' + (codeSpans.length - 1) + '@@';
+		});
+
+		out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+		out = out.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+		out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+		out = out.replace(/_([^_]+)_/g, '<em>$1</em>');
+		out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, label, url) {
+			return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+		});
+
+		out = out.replace(/@@SOC_CODE(\d+)@@/g, function (m, idx) {
+			return '<code>' + codeSpans[Number(idx)] + '</code>';
+		});
+
+		return out;
+	}
+
+	// Markdown -> HTML tối giản cho text node: heading, đoạn văn, danh sách,
+	// blockquote, code fence — đủ để khớp cách Obsidian hiển thị text node
+	// trong canvas (nó render markdown, không phải plain text).
+	function renderMarkdown(raw) {
+		var lines = escapeHtml(raw == null ? '' : String(raw)).split(/\r\n|\r|\n/);
+		var html = '';
+		var i = 0;
+		var n = lines.length;
+		var isBlank = /^\s*$/;
+		var isFence = /^```/;
+		var isHeading = /^#{1,6}\s+/;
+		var isQuote = /^&gt;\s?/;
+		var isUl = /^[-*+]\s+/;
+		var isOl = /^\d+\.\s+/;
+
+		while (i < n) {
+			var line = lines[i];
+
+			if (isBlank.test(line)) {
+				i++;
+				continue;
+			}
+
+			var fence = line.match(/^```(.*)$/);
+			if (fence) {
+				var codeLines = [];
+				i++;
+				while (i < n && !/^```\s*$/.test(lines[i])) {
+					codeLines.push(lines[i]);
+					i++;
+				}
+				i++;
+				html += '<pre><code>' + codeLines.join('\n') + '</code></pre>';
+				continue;
+			}
+
+			var heading = line.match(/^(#{1,6})\s+(.*)$/);
+			if (heading) {
+				var level = heading[1].length;
+				html += '<h' + level + '>' + renderInline(heading[2]) + '</h' + level + '>';
+				i++;
+				continue;
+			}
+
+			if (isQuote.test(line)) {
+				var quoteLines = [];
+				while (i < n && isQuote.test(lines[i])) {
+					quoteLines.push(lines[i].replace(isQuote, ''));
+					i++;
+				}
+				html += '<blockquote><p>' + quoteLines.map(renderInline).join('<br>') + '</p></blockquote>';
+				continue;
+			}
+
+			if (isUl.test(line)) {
+				var uItems = [];
+				while (i < n && isUl.test(lines[i])) {
+					uItems.push(lines[i].replace(isUl, ''));
+					i++;
+				}
+				html += '<ul>' + uItems.map(function (it) {
+					return '<li>' + renderInline(it) + '</li>';
+				}).join('') + '</ul>';
+				continue;
+			}
+
+			if (isOl.test(line)) {
+				var oItems = [];
+				while (i < n && isOl.test(lines[i])) {
+					oItems.push(lines[i].replace(isOl, ''));
+					i++;
+				}
+				html += '<ol>' + oItems.map(function (it) {
+					return '<li>' + renderInline(it) + '</li>';
+				}).join('') + '</ol>';
+				continue;
+			}
+
+			var paraLines = [];
+			while (
+				i < n &&
+				!isBlank.test(lines[i]) &&
+				!isFence.test(lines[i]) &&
+				!isHeading.test(lines[i]) &&
+				!isQuote.test(lines[i]) &&
+				!isUl.test(lines[i]) &&
+				!isOl.test(lines[i])
+			) {
+				paraLines.push(lines[i]);
+				i++;
+			}
+			if (paraLines.length) {
+				html += '<p>' + paraLines.map(renderInline).join('<br>') + '</p>';
+			}
+		}
+
+		return html;
 	}
 
 	function sideAnchor(node, side) {
@@ -219,11 +357,25 @@
 				var color = resolveColor(n.color);
 				if (color) {
 					el.style.borderColor = color;
+					// Yêu cầu: nền phải TỐI và XÁM hơn nữa — tỉ lệ giống ảnh
+					// mẫu (node gần như đen, chỉ ánh chút màu, nổi bật nhờ
+					// viền màu rực chứ không phải nhờ nền). Giảm % màu gốc
+					// trong darkAccent (12% thay vì 20%) để nó xám/tối hơn,
+					// rồi pha darkAccent với tỉ trọng còn lớn hơn nữa (85%)
+					// vào var(--soc-bg) — darkAccent luôn tối hơn --soc-bg ở
+					// cả 2 theme (xem canvas-viewer.css), nên đẩy tỉ trọng
+					// nó lên vẫn giữ đúng "tối hơn nền canvas" đồng thời làm
+					// nền node đen/xám gần sát mức trong ảnh mẫu.
+					el.style.backgroundColor =
+						'color-mix(in srgb, var(--soc-bg) 15%, color-mix(in srgb, ' + color + ' 12%, black 88%) 85%)';
+					// Custom property để CSS (border-bottom của heading) đọc
+					// đúng màu viền của node này — xem canvas-viewer.css.
+					el.style.setProperty('--soc-node-accent', color);
 				}
 
 				var content = document.createElement('div');
 				content.className = 'soc-canvas__node-content';
-				content.textContent = n.text || '';
+				content.innerHTML = renderMarkdown(n.text || '');
 				el.appendChild(content);
 
 				world.appendChild(el);
@@ -276,6 +428,11 @@
 		// Kéo để pan.
 		var dragging = false, lastX = 0, lastY = 0, moved = false;
 		viewport.addEventListener('mousedown', function (e) {
+			// Chặn hành vi bôi đen text mặc định của trình duyệt khi bấm-kéo
+			// (CSS user-select: none đã chặn phần lớn, preventDefault ở đây
+			// chặn nốt việc bắt đầu drag-select mà vài trình duyệt vẫn kích
+			// hoạt trên mousedown trước khi user-select kịp áp dụng).
+			e.preventDefault();
 			dragging = true;
 			moved = false;
 			lastX = e.clientX;
@@ -319,8 +476,19 @@
 			touchLast = null;
 		});
 
-		// Cuộn chuột để zoom quanh vị trí con trỏ.
+		// Cuộn chuột để zoom quanh vị trí con trỏ — trừ khi con trỏ đang ở
+		// trên một node có scrollbar dọc (nội dung dài hơn khung node) và
+		// còn chỗ để cuộn theo hướng đó: khi đó để trình duyệt tự cuộn nội
+		// dung node như bình thường, không zoom canvas.
 		viewport.addEventListener('wheel', function (e) {
+			var contentEl = e.target.closest && e.target.closest('.soc-canvas__node-content');
+			if (contentEl && contentEl.scrollHeight > contentEl.clientHeight) {
+				var atTop = contentEl.scrollTop <= 0;
+				var atBottom = contentEl.scrollTop + contentEl.clientHeight >= contentEl.scrollHeight - 1;
+				if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+					return;
+				}
+			}
 			e.preventDefault();
 			var rect = viewport.getBoundingClientRect();
 			var factor = e.deltaY < 0 ? 1.1 : 0.9;
