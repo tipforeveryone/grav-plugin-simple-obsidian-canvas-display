@@ -1,5 +1,7 @@
 .soc-canvas {
-	--soc-bg: #f4f4f5;
+	/* Xám trung tính thuần (R=G=B), không ngả xanh nhẹ như #f4f4f5 trước
+	   đây, và đậm hơn một chút để rõ là "xám" thay vì gần trắng. */
+	--soc-bg: #eeeeee;
 	--soc-grid: rgba(0, 0, 0, 0.12);
 	--soc-node-bg: #ffffff;
 	--soc-node-border: #a8a8ad;
@@ -23,7 +25,8 @@
 
 @media (prefers-color-scheme: dark) {
 	.soc-canvas {
-		--soc-bg: #0d0e10;
+		/* Gần đen hơn nữa để khớp ảnh mẫu (nền canvas gần như đen tuyền). */
+		--soc-bg: #0a0a0b;
 		--soc-grid: rgba(255, 255, 255, 0.09);
 		--soc-node-bg: #1a1b1e;
 		--soc-node-border: #44474c;
@@ -53,10 +56,44 @@
 	touch-action: none;
 	-webkit-user-select: none;
 	user-select: none;
+	/* overflow: auto để lộ scrollbar thật của trình duyệt, đồng bộ với
+	   .soc-canvas__scaler bên dưới (kích thước = worldSize * scale) — thay
+	   cho việc chỉ mô phỏng pan bằng transform: translate như trước, lúc đó
+	   viewport không có nội dung "trong luồng" nào để trình duyệt tính
+	   scrollWidth/scrollHeight nên không thể có scrollbar. */
+	overflow: auto;
+	scrollbar-width: thin;
+	scrollbar-color: var(--soc-node-border) transparent;
+}
+
+.soc-canvas__viewport::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.soc-canvas__viewport::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.soc-canvas__viewport::-webkit-scrollbar-thumb {
+	background: var(--soc-node-border);
+	border-radius: 4px;
+}
+
+.soc-canvas__viewport::-webkit-scrollbar-thumb:hover {
+	background: var(--soc-muted);
 }
 
 .soc-canvas__viewport.is-dragging {
 	cursor: grabbing;
+}
+
+/* Phần tử "trong luồng" (không position: absolute) mà JS set width/height =
+   worldSize.w/h * scale — chính kích thước này quyết định
+   scrollWidth/scrollHeight của viewport, tức là nội dung scrollbar phản ánh
+   đúng vùng có thể cuộn. */
+.soc-canvas__scaler {
+	position: relative;
 }
 
 .soc-canvas__world {
@@ -102,7 +139,7 @@
 	overflow-y: auto;
 	overflow-x: hidden;
 	color: var(--soc-node-text);
-	font-size: 15px;
+	font-size: 17px;
 	line-height: 1.4;
 	word-break: break-word;
 	scrollbar-width: thin;
@@ -194,6 +231,27 @@
 	margin: 0.15em 0;
 }
 
+/* Một số template chứa shortcode (.wiki-article, .article-content trong
+   site.css) tự reset list-style: none trên <ul> và vẽ bullet riêng (hình
+   thoi màu amber) bằng ::before trên <li>, với specificity CAO HƠN
+   ".soc-canvas__node-content li" (họ có "ul > li" = 2 selector kiểu + 1
+   class, ta chỉ có "li" = 1 selector kiểu + 1 class) nên thắng bất kể thứ tự
+   nạp CSS. Ép !important + đè đúng các thuộc tính đó để bullet luôn là chấm
+   tròn mặc định của trình duyệt, không phụ thuộc theme của trang chứa. */
+.soc-canvas__node-content ul {
+	list-style: disc !important;
+	padding-left: 1.4em !important;
+}
+
+.soc-canvas__node-content ul > li {
+	position: static !important;
+	padding-left: 0 !important;
+}
+
+.soc-canvas__node-content ul > li::before {
+	content: none !important;
+}
+
 .soc-canvas__node-content blockquote {
 	margin: 0.4em 0;
 	padding-left: 0.7em;
@@ -227,6 +285,25 @@
 	text-decoration: underline;
 }
 
+.soc-canvas__coords {
+	position: absolute;
+	left: 8px;
+	top: 8px;
+	z-index: 1;
+	padding: 3px 7px;
+	border-radius: 4px;
+	background: var(--soc-node-bg);
+	border: 1px solid var(--soc-node-border);
+	color: var(--soc-muted);
+	font-size: 11px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	line-height: 1.3;
+	white-space: nowrap;
+	/* Chỉ để đọc số, không chặn tương tác (kéo/chạm/scroll) với canvas bên
+	   dưới dù nó nằm đè lên góc trên-trái của world. */
+	pointer-events: none;
+}
+
 .soc-canvas__controls {
 	position: absolute;
 	right: 10px;
@@ -237,15 +314,21 @@
 }
 
 .soc-canvas__controls button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	width: 28px;
 	height: 28px;
+	padding: 0;
 	border: 1px solid var(--soc-node-border);
 	border-radius: 4px;
 	background: var(--soc-node-bg);
 	color: var(--soc-node-text);
-	font-size: 15px;
-	line-height: 1;
 	cursor: pointer;
+}
+
+.soc-canvas__controls button svg {
+	display: block;
 }
 
 .soc-canvas__controls button:hover {

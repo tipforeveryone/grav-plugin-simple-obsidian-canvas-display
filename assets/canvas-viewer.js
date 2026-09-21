@@ -207,38 +207,114 @@
 		}
 		root.setAttribute('data-soc-canvas-ready', '1');
 
+		// Tọa độ/zoom mặc định lấy từ tham số shortcode (PHP đã validate và
+		// chỉ set data-attribute khi có giá trị hợp lệ). Thiếu tham số nào
+		// thì tham số đó rơi về mặc định riêng: x/y -> tâm hình chữ nhật bao
+		// toàn bộ node (rawCenterX/Y, tính trong render()), zoom -> scale
+		// vừa khung (fitScale()).
+		var attrX = root.getAttribute('data-soc-canvas-x');
+		var attrY = root.getAttribute('data-soc-canvas-y');
+		var attrZoom = root.getAttribute('data-soc-canvas-zoom');
+		var hasX = attrX !== null && attrX !== '' && !isNaN(parseFloat(attrX));
+		var hasY = attrY !== null && attrY !== '' && !isNaN(parseFloat(attrY));
+		var hasZoom = attrZoom !== null && attrZoom !== '' && !isNaN(parseFloat(attrZoom));
+		var xAttr = hasX ? parseFloat(attrX) : 0;
+		var yAttr = hasY ? parseFloat(attrY) : 0;
+		var zoomAttr = hasZoom ? parseFloat(attrZoom) : 1;
+
 		var viewport = document.createElement('div');
 		viewport.className = 'soc-canvas__viewport';
 
+		// .soc-canvas__scaler là phần tử "trong luồng" (không
+		// position: absolute) mà JS set kích thước = worldSize * scale — nhờ
+		// đó trình duyệt tính đúng scrollWidth/scrollHeight của viewport và
+		// tự vẽ scrollbar thật. world bên trong giữ kích thước KHÔNG scale
+		// (đúng bằng worldSize) rồi scale bằng transform, khớp hình ảnh với
+		// box của scaler.
+		var scaler = document.createElement('div');
+		scaler.className = 'soc-canvas__scaler';
+
 		var world = document.createElement('div');
 		world.className = 'soc-canvas__world';
-		viewport.appendChild(world);
+		scaler.appendChild(world);
+		viewport.appendChild(scaler);
 
 		var loading = document.createElement('div');
 		loading.className = 'soc-canvas__loading';
 		loading.textContent = 'Đang tải canvas…';
 
+		// Ô nhỏ ở góc trên-trái hiển thị tọa độ tâm khung nhìn hiện tại (theo
+		// đúng hệ tọa độ trong file .canvas) và hệ số zoom — để người dùng
+		// pan/zoom bằng tay tới vị trí ưng ý rồi đọc số này điền thẳng vào
+		// tham số x/y/zoom của shortcode, không cần đoán.
+		var coords = document.createElement('div');
+		coords.className = 'soc-canvas__coords';
+
 		root.innerHTML = '';
 		root.appendChild(viewport);
 		root.appendChild(loading);
+		root.appendChild(coords);
 
-		var state = { scale: 1, x: 0, y: 0 };
+		var state = { scale: 1 };
 		var worldSize = { w: 0, h: 0 };
+		var offsetX = 0, offsetY = 0;
+		var rawCenterX = 0, rawCenterY = 0;
 
-		function applyTransform() {
-			world.style.transform = 'translate(' + state.x + 'px, ' + state.y + 'px) scale(' + state.scale + ')';
+		function updateLayout() {
+			scaler.style.width = (worldSize.w * state.scale) + 'px';
+			scaler.style.height = (worldSize.h * state.scale) + 'px';
+			world.style.transform = 'scale(' + state.scale + ')';
 		}
 
-		function fitToView() {
+		// Tâm khung nhìn hiện tại, quy đổi ngược về hệ tọa độ gốc trong file
+		// .canvas (trừ offsetX/offsetY của lần render) — đúng giá trị cần
+		// điền vào tham số x/y của shortcode để mở lại đúng vị trí này.
+		function updateCoordsDisplay() {
 			var rect = viewport.getBoundingClientRect();
-			if (!worldSize.w || !worldSize.h || !rect.width || !rect.height) {
+			if (!rect.width || !rect.height) {
 				return;
 			}
-			var scale = Math.min(rect.width / worldSize.w, rect.height / worldSize.h, 1);
-			state.scale = scale;
-			state.x = (rect.width - worldSize.w * scale) / 2;
-			state.y = (rect.height - worldSize.h * scale) / 2;
-			applyTransform();
+			var rawX = (viewport.scrollLeft + rect.width / 2) / state.scale - offsetX;
+			var rawY = (viewport.scrollTop + rect.height / 2) / state.scale - offsetY;
+			coords.textContent = 'x: ' + Math.round(rawX) + '  y: ' + Math.round(rawY) + '  zoom: ' + state.scale.toFixed(2);
+		}
+
+		function fitScale() {
+			var rect = viewport.getBoundingClientRect();
+			if (!worldSize.w || !worldSize.h || !rect.width || !rect.height) {
+				return 1;
+			}
+			return Math.min(rect.width / worldSize.w, rect.height / worldSize.h, 1);
+		}
+
+		// Đưa điểm (rawX, rawY) — tọa độ gốc trong file .canvas, chưa cộng
+		// offsetX/offsetY của lần render hiện tại — vào giữa khung nhìn, ở
+		// mức zoom cho trước.
+		function goTo(rawX, rawY, scale) {
+			state.scale = Math.min(Math.max(scale, MIN_SCALE), MAX_SCALE);
+			updateLayout();
+			var rect = viewport.getBoundingClientRect();
+			viewport.scrollLeft = (rawX + offsetX) * state.scale - rect.width / 2;
+			viewport.scrollTop = (rawY + offsetY) * state.scale - rect.height / 2;
+			updateCoordsDisplay();
+		}
+
+		// Khung nhìn mặc định (lúc tải trang / khi resize cửa sổ): từng tham
+		// số x/y/zoom dùng giá trị khai báo ở shortcode nếu có, thiếu tham số
+		// nào thì dùng mặc định riêng của tham số đó — không phải
+		// tất-cả-hoặc-không.
+		function resetView() {
+			goTo(hasX ? xAttr : rawCenterX, hasY ? yAttr : rawCenterY, hasZoom ? zoomAttr : fitScale());
+		}
+
+		// Nút "vừa khung" (icon 4 góc mở rộng — "xem tất cả"): LUÔN fit toàn
+		// bộ node vào khung nhìn, bỏ qua x/y/zoom cấu hình ở shortcode —
+		// khác resetView() ở trên. Nếu không tách riêng, trang có cấu hình
+		// x/y/zoom cố định (để mở mặc định ở một góc cụ thể) sẽ khiến nút này
+		// chỉ quay lại đúng góc đó thay vì thực sự hiện toàn cảnh canvas như
+		// icon thể hiện.
+		function fitAll() {
+			goTo(rawCenterX, rawCenterY, fitScale());
 		}
 
 		function zoomBy(factor, centerX, centerY) {
@@ -246,10 +322,15 @@
 			var cx = centerX == null ? rect.width / 2 : centerX;
 			var cy = centerY == null ? rect.height / 2 : centerY;
 			var newScale = Math.min(Math.max(state.scale * factor, MIN_SCALE), MAX_SCALE);
-			state.x = cx - (cx - state.x) * (newScale / state.scale);
-			state.y = cy - (cy - state.y) * (newScale / state.scale);
+			// Toạ độ (trong world chưa scale) đang nằm dưới con trỏ — giữ
+			// nguyên toạ độ này sau khi đổi scale để zoom đúng quanh con trỏ.
+			var worldX = (viewport.scrollLeft + cx) / state.scale;
+			var worldY = (viewport.scrollTop + cy) / state.scale;
 			state.scale = newScale;
-			applyTransform();
+			updateLayout();
+			viewport.scrollLeft = worldX * newScale - cx;
+			viewport.scrollTop = worldY * newScale - cy;
+			updateCoordsDisplay();
 		}
 
 		function render(data) {
@@ -270,9 +351,12 @@
 				}
 			});
 
+			rawCenterX = (minX + maxX) / 2;
+			rawCenterY = (minY + maxY) / 2;
+
 			var pad = 160;
-			var offsetX = -minX + pad;
-			var offsetY = -minY + pad;
+			offsetX = -minX + pad;
+			offsetY = -minY + pad;
 			worldSize.w = (maxX - minX) + pad * 2;
 			worldSize.h = (maxY - minY) + pad * 2;
 
@@ -356,18 +440,19 @@
 
 				var color = resolveColor(n.color);
 				if (color) {
+					// Khớp theo ảnh mẫu người dùng gửi: viền dùng thẳng màu
+					// preset gốc, KHÔNG pha xám nữa (các lần chỉnh trước theo
+					// hướng giảm sắc độ đã đi ngược ảnh mẫu — viền trong ảnh
+					// rõ ràng là màu rực, không xám).
 					el.style.borderColor = color;
-					// Yêu cầu: nền phải TỐI và XÁM hơn nữa — tỉ lệ giống ảnh
-					// mẫu (node gần như đen, chỉ ánh chút màu, nổi bật nhờ
-					// viền màu rực chứ không phải nhờ nền). Giảm % màu gốc
-					// trong darkAccent (12% thay vì 20%) để nó xám/tối hơn,
-					// rồi pha darkAccent với tỉ trọng còn lớn hơn nữa (85%)
-					// vào var(--soc-bg) — darkAccent luôn tối hơn --soc-bg ở
-					// cả 2 theme (xem canvas-viewer.css), nên đẩy tỉ trọng
-					// nó lên vẫn giữ đúng "tối hơn nền canvas" đồng thời làm
-					// nền node đen/xám gần sát mức trong ảnh mẫu.
+					// Nền: pha màu gốc với đen theo tỉ lệ đậm hơn hẳn trước
+					// (20% màu, trước chỉ 5%) để ra đúng kiểu nền tối NHƯNG
+					// rõ sắc màu (nền đỏ sẫm/lục sẫm...) như trong ảnh, thay
+					// vì gần như đen/xám thuần như trước. Vẫn pha thêm một
+					// chút var(--soc-bg) (10%) để nền node không hoàn toàn
+					// tách rời tông nền chung của canvas.
 					el.style.backgroundColor =
-						'color-mix(in srgb, var(--soc-bg) 15%, color-mix(in srgb, ' + color + ' 12%, black 88%) 85%)';
+						'color-mix(in srgb, var(--soc-bg) 10%, color-mix(in srgb, ' + color + ' 20%, black 80%) 90%)';
 					// Custom property để CSS (border-bottom của heading) đọc
 					// đúng màu viền của node này — xem canvas-viewer.css.
 					el.style.setProperty('--soc-node-accent', color);
@@ -381,7 +466,7 @@
 				world.appendChild(el);
 			});
 
-			fitToView();
+			updateLayout();
 		}
 
 		fetch(src, { credentials: 'same-origin' })
@@ -394,6 +479,7 @@
 			.then(function (data) {
 				loading.remove();
 				render(data);
+				resetView();
 				setupControls();
 			})
 			.catch(function (err) {
@@ -404,22 +490,50 @@
 		function setupControls() {
 			var controls = document.createElement('div');
 			controls.className = 'soc-canvas__controls';
+			// Icon dạng SVG inline (stroke: currentColor) thay cho ký tự
+			// Unicode trước đây (−/⤢/+) — kính lúp có dấu trừ/cộng cho
+			// zoom out/in, 4 góc mở rộng cho "vừa khung" (chuẩn icon
+			// "fit/maximize" quen thuộc), đều rõ ràng và nhất quán hơn.
 			controls.innerHTML =
-				'<button type="button" data-soc-action="zoom-out" aria-label="Thu nhỏ">−</button>' +
-				'<button type="button" data-soc-action="zoom-reset" aria-label="Vừa khung">⤢</button>' +
-				'<button type="button" data-soc-action="zoom-in" aria-label="Phóng to">+</button>';
+				'<button type="button" data-soc-action="zoom-out" aria-label="Thu nhỏ" title="Thu nhỏ">'
+				+ '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+				+ '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line>'
+				+ '</svg></button>'
+				+ '<button type="button" data-soc-action="zoom-reset" aria-label="Vừa khung" title="Vừa khung">'
+				+ '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+				+ '<path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>'
+				+ '</svg></button>'
+				+ '<button type="button" data-soc-action="zoom-in" aria-label="Phóng to" title="Phóng to">'
+				+ '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+				+ '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line>'
+				+ '</svg></button>';
+			// Nút riêng để về đúng x/y/zoom mặc định khai báo ở shortcode —
+			// khác nút "vừa khung" ở trên (luôn fit toàn bộ node, bỏ qua cấu
+			// hình). Chỉ hiện khi trang thực sự có khai báo ít nhất 1 trong 3
+			// tham số x/y/zoom, tránh thừa một nút làm y hệt nút "vừa khung".
+			// Icon: crosshair/target — quen dùng cho "về đúng một điểm/khung
+			// nhìn đã lưu", phân biệt rõ với icon "xem tất cả".
+			if (hasX || hasY || hasZoom) {
+				controls.innerHTML +=
+					'<button type="button" data-soc-action="goto-default" aria-label="Về khung nhìn mặc định" title="Về khung nhìn mặc định">'
+					+ '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+					+ '<circle cx="12" cy="12" r="9"></circle><line x1="12" y1="2" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="22"></line><line x1="2" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="22" y2="12"></line><circle cx="12" cy="12" r="2"></circle>'
+					+ '</svg></button>';
+			}
 			controls.addEventListener('click', function (e) {
 				var btn = e.target.closest('[data-soc-action]');
 				if (!btn) {
 					return;
 				}
 				var action = btn.getAttribute('data-soc-action');
-				if (action === 'zoom-in') {
+				if (action === 'goto-default') {
+					resetView();
+				} else if (action === 'zoom-in') {
 					zoomBy(1.25);
 				} else if (action === 'zoom-out') {
 					zoomBy(0.8);
 				} else if (action === 'zoom-reset') {
-					fitToView();
+					fitAll();
 				}
 			});
 			root.appendChild(controls);
@@ -428,6 +542,14 @@
 		// Kéo để pan.
 		var dragging = false, lastX = 0, lastY = 0, moved = false;
 		viewport.addEventListener('mousedown', function (e) {
+			// Bấm vào chính scrollbar thật (nằm ngoài clientWidth/clientHeight
+			// của viewport, tức phần dải cuộn) thì để trình duyệt tự xử lý,
+			// không khởi động pan bằng tay ở đây — nếu không sẽ bị "kéo đúp":
+			// vừa kéo scrollbar vừa bị handler này ghi đè scrollLeft/scrollTop.
+			var rect = viewport.getBoundingClientRect();
+			if (e.clientX - rect.left > viewport.clientWidth || e.clientY - rect.top > viewport.clientHeight) {
+				return;
+			}
 			// Chặn hành vi bôi đen text mặc định của trình duyệt khi bấm-kéo
 			// (CSS user-select: none đã chặn phần lớn, preventDefault ở đây
 			// chặn nốt việc bắt đầu drag-select mà vài trình duyệt vẫn kích
@@ -444,11 +566,10 @@
 				return;
 			}
 			moved = true;
-			state.x += e.clientX - lastX;
-			state.y += e.clientY - lastY;
+			viewport.scrollLeft -= e.clientX - lastX;
+			viewport.scrollTop -= e.clientY - lastY;
 			lastX = e.clientX;
 			lastY = e.clientY;
-			applyTransform();
 		});
 		window.addEventListener('mouseup', function () {
 			dragging = false;
@@ -465,10 +586,9 @@
 		viewport.addEventListener('touchmove', function (e) {
 			if (e.touches.length === 1 && touchLast) {
 				var t = e.touches[0];
-				state.x += t.clientX - touchLast.x;
-				state.y += t.clientY - touchLast.y;
+				viewport.scrollLeft -= t.clientX - touchLast.x;
+				viewport.scrollTop -= t.clientY - touchLast.y;
 				touchLast = { x: t.clientX, y: t.clientY };
-				applyTransform();
 				e.preventDefault();
 			}
 		}, { passive: false });
@@ -495,7 +615,13 @@
 			zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
 		}, { passive: false });
 
-		window.addEventListener('resize', fitToView);
+		// Kéo chuột/chạm set scrollLeft/scrollTop trực tiếp (không đi qua
+		// goTo()/zoomBy()) nên bắt bằng sự kiện scroll thay vì gọi tay ở từng
+		// nơi — cũng tiện bắt luôn trường hợp người dùng cuộn bằng scrollbar
+		// thật (đã thêm ở CSS) thay vì kéo/chạm.
+		viewport.addEventListener('scroll', updateCoordsDisplay);
+
+		window.addEventListener('resize', resetView);
 	}
 
 	function initAll() {
